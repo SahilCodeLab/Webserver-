@@ -113,8 +113,8 @@
     </div>
 
     <script>
-        const apiKey = 'YOUR_API_KEY';  // Replace with your API key
-        const apiUrl = 'https://api.giminin.com/reply';  // Replace with the actual API URL
+        const apiKey = 'YOUR_HUGGING_FACE_API_KEY';  // Replace with your Hugging Face API key
+        const apiUrl = 'https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium';  // Hugging Face API URL
 
         function sendMessage() {
             const userMessage = document.getElementById('userMessage').value;
@@ -127,18 +127,18 @@
             document.getElementById('messages').appendChild(userMsgElement);
             document.getElementById('userMessage').value = '';
 
-            // Make API request
+            // Make API request to Hugging Face
             fetch(apiUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${apiKey}`
                 },
-                body: JSON.stringify({ message: userMessage })
+                body: JSON.stringify({ inputs: userMessage })
             })
             .then(response => response.json())
             .then(data => {
-                const botMessage = data.reply;  // Assuming the API returns a 'reply' field
+                const botMessage = data.generated_text || 'Sorry, I didn’t understand that.';
                 const botMsgElement = document.createElement('div');
                 botMsgElement.classList.add('message', 'bot-msg');
                 botMsgElement.textContent = botMessage;
