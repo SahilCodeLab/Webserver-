@@ -10,6 +10,10 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// FIX 1: Confiar en el proxy inverso (como Render) para que express-rate-limit funcione correctamente.
+// Esto debe ir antes de que se use cualquier middleware que dependa de la IP del cliente.
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
@@ -35,10 +39,16 @@ if (!OPENROUTER_API_KEY) {
   process.exit(1);
 }
 
-// OpenRouter Client - Properly configured
+// FIX 2: Configurar el cliente de OpenRouter correctamente.
+// Mueve las cabeceras personalizadas a `defaultHeaders` en el constructor.
+// Esto asegura que la autenticación (apiKey) se envíe siempre correctamente.
 const openai = new OpenAI({
   apiKey: OPENROUTER_API_KEY,
   baseURL: 'https://openrouter.ai/api/v1',
+  defaultHeaders: {
+    'HTTP-Referer': process.env.SITE_URL || 'http://localhost:3000',
+    'X-Title': process.env.SITE_NAME || 'EduSmart AI'
+  }
 });
 
 // Error handling middleware
@@ -122,10 +132,7 @@ async function generateAIResponse(prompt, context, modelPreference = 'auto') {
       ],
       temperature: 0.7,
       max_tokens: 2048,
-      extra_headers: {
-        'HTTP-Referer': process.env.SITE_URL || 'http://localhost:3000',
-        'X-Title': process.env.SITE_NAME || 'EduSmart AI'
-      }
+      // FIX 2: Elimina `extra_headers` de aquí, ya que ahora están en el constructor del cliente.
     });
 
     const result = completion.choices[0]?.message?.content;
@@ -151,9 +158,9 @@ async function generateAIResponse(prompt, context, modelPreference = 'auto') {
 
     // Provide more specific error messages
     let errorMessage = 'AI service is currently unavailable. Please try again later.';
-    
+
     if (error.status === 401) {
-      errorMessage = 'Authentication failed. Please check your API key configuration.';
+      errorMessage = 'Authentication failed. Please check your OPENROUTER_API_KEY environment variable.';
     } else if (error.status === 429) {
       errorMessage = 'Rate limit exceeded. Please try again later.';
     } else if (error.status === 404) {
@@ -163,6 +170,10 @@ async function generateAIResponse(prompt, context, modelPreference = 'auto') {
     throw new Error(errorMessage);
   }
 }
+
+// ... (El resto de tu código no necesita cambios, así que lo omito por brevedad) ...
+// ... (generatePDF, endpoints /generate-assignment, /generate-long-answer, etc.) ...
+
 
 // 📄 PDF Generator Function with enhanced styling
 function generatePDF(content, res, title = 'EduSmart AI Document') {
@@ -235,7 +246,7 @@ function generatePDF(content, res, title = 'EduSmart AI Document') {
 app.post('/generate-assignment', async (req, res) => {
   try {
     const { prompt, level = 'high-school', subject = 'General' } = req.body;
-    
+
     if (!prompt) {
       return res.status(400).json({ 
         error: 'Prompt is required',
@@ -249,12 +260,12 @@ app.post('/generate-assignment', async (req, res) => {
     and Submission guidelines. Use clear, academic language.`;
 
     const result = await generateAIResponse(prompt, context, 'assignment');
-    
+
     // PDF export option
     if (req.query.download === 'pdf') {
       return generatePDF(result.text, res, `Assignment - ${prompt}`);
     }
-    
+
     res.json({
       ...result,
       type: 'assignment',
@@ -282,11 +293,11 @@ app.post('/generate-long-answer', async (req, res) => {
     Use academic language and ensure factual accuracy.`;
 
     const result = await generateAIResponse(prompt, context, 'long');
-    
+
     if (req.query.download === 'pdf') {
       return generatePDF(result.text, res, `Long Answer - ${prompt}`);
     }
-    
+
     res.json({
       ...result,
       type: 'long-answer',
@@ -338,11 +349,11 @@ app.post('/generate-quiz', async (req, res) => {
     Add a brief explanation for each answer.`;
 
     const result = await generateAIResponse(prompt, context, 'quiz');
-    
+
     if (req.query.download === 'pdf') {
       return generatePDF(result.text, res, `Quiz - ${prompt}`);
     }
-    
+
     res.json({
       ...result,
       type: 'quiz',
