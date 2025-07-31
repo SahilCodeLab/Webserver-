@@ -1,18 +1,23 @@
+// Sudhar ke saath aapka updated code
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
 const { OpenAI } = require('openai');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// FIX 1: Confiar en el proxy inverso (como Render) para que express-rate-limit funcione correctamente.
-// Esto debe ir antes de que se use cualquier middleware que dependa de la IP del cliente.
-app.set('trust proxy', 1);
+// Environment Keys Check
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+if (!OPENROUTER_API_KEY) {
+  console.error('❌ OPENROUTER_API_KEY .env file mein zaroori hai');
+  process.exit(1);
+}
 
 // Middleware
 app.use(cors({
@@ -23,106 +28,40 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use('/api-docs', express.static(path.join(__dirname, 'docs')));
 
-// Rate limiting
-const rateLimit = require('express-rate-limit');
+// Rate limiting (applied to all /generate-* routes)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  max: 100, // Har IP se 100 requests per 15 min
+  message: 'Bahut saare requests aa gaye hain, कृपया baad mein try karein.'
 });
 app.use('/generate-*', limiter);
 
-// Environment Keys
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-if (!OPENROUTER_API_KEY) {
-  console.error('❌ OPENROUTER_API_KEY is required in .env file');
-  process.exit(1);
-}
-
-// FIX 2: Configurar el cliente de OpenRouter correctamente.
-// Mueve las cabeceras personalizadas a `defaultHeaders` en el constructor.
-// Esto asegura que la autenticación (apiKey) se envíe siempre correctamente.
+// OpenRouter Client
 const openai = new OpenAI({
   apiKey: OPENROUTER_API_KEY,
   baseURL: 'https://openrouter.ai/api/v1',
-  defaultHeaders: {
-    'HTTP-Referer': process.env.SITE_URL || 'http://localhost:3000',
-    'X-Title': process.env.SITE_NAME || 'EduSmart AI'
-  }
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Server Error:', err);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
-});
-
-// Health check with detailed status
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'operational',
-    timestamp: new Date().toISOString(),
-    version: '1.0.0',
-    features: {
-      assignmentGenerator: true,
-      longAnswer: true,
-      shortAnswer: true,
-      quizGenerator: true,
-      grammarFixer: true,
-      aiTutorChat: true,
-      pdfExport: true
-    },
-    models: {
-      primary: 'OpenRouter AI Models',
-      fallback: 'None (OpenRouter only)'
-    },
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-// Root endpoint
-app.get('/', (req, res) => {
-  res.json({
-    message: 'Welcome to EduSmart AI API',
-    documentation: '/api-docs',
-    endpoints: [
-      'POST /generate-assignment',
-      'POST /generate-long-answer', 
-      'POST /generate-short-answer',
-      'POST /generate-quiz',
-      'POST /fix-grammar',
-      'POST /chat',
-      'GET /health'
-    ],
-    status: 'active'
-  });
-});
-
-// ✨ Unified AI Response Generator with enhanced error handling
+// ✨ Unified AI Response Generator
 async function generateAIResponse(prompt, context, modelPreference = 'auto') {
   if (!prompt || !context) {
-    throw new Error('Prompt and context are required');
+    throw new Error('Prompt aur context dono zaroori hain');
   }
 
-  // Model mapping for specific use cases
   const modelMap = {
-    assignment: 'google/gemini-2.0-flash-exp:free',
-    long: 'google/gemini-2.0-flash-exp:free',
-    short: 'qwen/qwen3-coder:free',
-    quiz: 'z-ai/glm-4.5-air:free',
-    grammar: 'qwen/qwen3-coder:free',
-    chat: 'z-ai/glm-4.5-air:free',
-    auto: 'google/gemini-2.0-flash-exp:free'
+    assignment: 'google/gemini-pro',
+    long: 'google/gemini-pro',
+    short: 'mistralai/mistral-7b-instruct:free',
+    quiz: 'google/gemini-pro',
+    grammar: 'mistralai/mistral-7b-instruct:free',
+    chat: 'mistralai/mistral-7b-instruct:free',
+    auto: 'google/gemini-pro'
   };
 
   const model = modelMap[modelPreference] || modelMap.auto;
-  const fullPrompt = `${context}\n\n${prompt}`.trim();
-
+  
   try {
-    console.log(`🎯 Using model: ${model} for request`);
+    console.log(`🎯 Model istemal ho raha hai: ${model}`);
 
     const completion = await openai.chat.completions.create({
       model: model,
@@ -132,12 +71,15 @@ async function generateAIResponse(prompt, context, modelPreference = 'auto') {
       ],
       temperature: 0.7,
       max_tokens: 2048,
-      // FIX 2: Elimina `extra_headers` de aquí, ya que ahora están en el constructor del cliente.
+      extra_headers: {
+        'HTTP-Referer': process.env.SITE_URL || 'http://localhost:3000',
+        'X-Title': process.env.SITE_NAME || 'EduSmart AI'
+      }
     });
 
-    const result = completion.choices[0]?.message?.content;
+    const result = completion.choices[0]?.message?.content?.trim();
     if (!result) {
-      throw new Error('Empty response from AI model');
+      throw new Error('AI model se khaali response mila');
     }
 
     return {
@@ -149,314 +91,172 @@ async function generateAIResponse(prompt, context, modelPreference = 'auto') {
     };
 
   } catch (error) {
-    console.error('❌ AI Generation Error:', {
-      model,
-      error: error.message,
-      status: error.status,
-      headers: error.headers
-    });
-
-    // Provide more specific error messages
-    let errorMessage = 'AI service is currently unavailable. Please try again later.';
-
-    if (error.status === 401) {
-      errorMessage = 'Authentication failed. Please check your OPENROUTER_API_KEY environment variable.';
-    } else if (error.status === 429) {
-      errorMessage = 'Rate limit exceeded. Please try again later.';
-    } else if (error.status === 404) {
-      errorMessage = `Model '${model}' not found. Please check model name or contact support.`;
-    }
-
+    console.error('❌ AI Generation Error:', { model, error: error.message, status: error.status });
+    let errorMessage = 'AI service abhi uplabdh nahi hai. Kripya baad mein try karein.';
+    if (error.status === 401) errorMessage = 'Authentication fail ho gaya. API key check karein.';
+    else if (error.status === 429) errorMessage = 'Rate limit cross ho gaya hai.';
+    else if (error.status === 404) errorMessage = `Model '${model}' nahi mila.`;
     throw new Error(errorMessage);
   }
 }
 
-// ... (El resto de tu código no necesita cambios, así que lo omito por brevedad) ...
-// ... (generatePDF, endpoints /generate-assignment, /generate-long-answer, etc.) ...
-
-
-// 📄 PDF Generator Function with enhanced styling
+// 📄 PDF Generator Function
 function generatePDF(content, res, title = 'EduSmart AI Document') {
-  try {
-    const doc = new PDFDocument({
-      margin: 50,
-      size: 'A4',
-      bufferPages: true
-    });
+    const doc = new PDFDocument({ margin: 50, size: 'A4', bufferPages: true });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${title.toLowerCase().replace(/[^a-zA-Z0-9]/g, '-')}.pdf"`);
-
-    // Pipe the PDF to the response
+    res.setHeader('Content-Disposition', `attachment; filename="${title.toLowerCase().replace(/[^a-z0-9]/g, '-')}.pdf"`);
+    
     doc.pipe(res);
 
-    // Add header
-    doc.image('https://via.placeholder.com/100x40?text=EduSmart+AI', 50, 45, { width: 100 })
-       .fillColor('#2563eb')
-       .fontSize(18)
-       .text(title, 160, 55);
-
-    // Add horizontal line
-    doc.moveTo(50, 100)
-       .lineTo(550, 100)
-       .strokeColor('#e5e7eb')
-       .stroke();
-
-    // Add content
-    doc.fillColor('#1f2937')
-       .fontSize(12)
-       .font('Helvetica')
-       .text(content, {
-         x: 50,
-         y: 120,
-         width: 500,
-         align: 'left',
-         lineGap: 4,
-         indent: 0,
-         paragraphGap: 4
-       });
-
-    // Add footer
-    const pages = doc.bufferedPageRange();
-    for (let i = 0; i < pages.count; i++) {
-      doc.switchToPage(i);
-      const oldBottomMargin = doc.page.margins.bottom;
-      doc.page.margins.bottom = 0;
-      doc.fillColor('#6b7280')
-          .fontSize(10)
-          .text(
-            `Page ${i + 1} of ${pages.count} • Generated by EduSmart AI • ${new Date().toLocaleDateString()}`,
-            50,
-            780,
-            { align: 'center' }
-          );
-      doc.page.margins.bottom = oldBottomMargin;
+    // Header with local logo
+    if (fs.existsSync('logo.png')) {
+        doc.image('logo.png', 50, 45, { width: 100 });
     }
+    doc.fillColor('#2563eb').fontSize(18).text(title, 160, 55);
+    doc.moveTo(50, 100).lineTo(550, 100).strokeColor('#e5e7eb').stroke();
 
-    // Finalize the PDF
+    // Content
+    doc.fillColor('#1f2937').fontSize(12).font('Helvetica').text(content, { x: 50, y: 120, width: 500, align: 'left', lineGap: 4 });
+
+    // Footer with page numbers
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+        doc.switchToPage(i);
+        doc.fillColor('#6b7280').fontSize(10).text(`Page ${i + 1} of ${range.count} • Generated by EduSmart AI`, 50, 780, { align: 'center' });
+    }
+    
     doc.end();
-
-  } catch (error) {
-    console.error('PDF Generation Error:', error);
-    res.status(500).json({ error: 'Failed to generate PDF document' });
-  }
 }
 
-// 🚀 Assignment Generator Endpoint
-app.post('/generate-assignment', async (req, res) => {
+
+// === API Endpoints ===
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'operational', timestamp: new Date().toISOString(), version: '1.0.1' });
+});
+
+app.get('/', (req, res) => {
+  res.json({ message: 'Welcome to EduSmart AI API', documentation: '/api-docs', status: 'active' });
+});
+
+app.post('/generate-assignment', async (req, res, next) => {
   try {
     const { prompt, level = 'high-school', subject = 'General' } = req.body;
+    if (!prompt) return res.status(400).json({ error: 'Prompt zaroori hai' });
 
-    if (!prompt) {
-      return res.status(400).json({ 
-        error: 'Prompt is required',
-        example: { prompt: 'Photosynthesis in plants' }
-      });
-    }
-
-    const context = `You are an expert educator creating assignments. 
-    Create a comprehensive assignment for ${level} level ${subject} students on "${prompt}".
-    Include: Learning objectives, Instructions, Tasks/Questions, Evaluation criteria, 
-    and Submission guidelines. Use clear, academic language.`;
-
+    const context = `Create a comprehensive assignment for ${level} level ${subject} students on "${prompt}". Include: Learning objectives, Instructions, Tasks/Questions, Evaluation criteria, and Submission guidelines.`;
     const result = await generateAIResponse(prompt, context, 'assignment');
-
-    // PDF export option
-    if (req.query.download === 'pdf') {
-      return generatePDF(result.text, res, `Assignment - ${prompt}`);
-    }
-
-    res.json({
-      ...result,
-      type: 'assignment',
-      subject,
-      level,
-      wordCount: result.text.split(' ').length
-    });
-
+    
+    if (req.query.download === 'pdf') return generatePDF(result.text, res, `Assignment - ${prompt}`);
+    res.json({ ...result, type: 'assignment', subject, level });
   } catch (error) {
-    res.status(500).json({ 
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
+    next(error); // Pass to central error handler
   }
 });
 
-// 📚 Long Answer Endpoint
-app.post('/generate-long-answer', async (req, res) => {
+app.post('/generate-long-answer', async (req, res, next) => {
   try {
     const { prompt, wordCount = '300-500' } = req.body;
-    if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+    if (!prompt) return res.status(400).json({ error: 'Prompt zaroori hai' });
 
-    const context = `Provide a detailed ${wordCount} word comprehensive explanation on "${prompt}".
-    Structure with: Introduction, Main Body (with subheadings), Examples, and Conclusion.
-    Use academic language and ensure factual accuracy.`;
-
+    const context = `Provide a detailed ${wordCount} word comprehensive explanation on "${prompt}". Structure with: Introduction, Main Body (with subheadings), Examples, and Conclusion.`;
     const result = await generateAIResponse(prompt, context, 'long');
-
-    if (req.query.download === 'pdf') {
-      return generatePDF(result.text, res, `Long Answer - ${prompt}`);
-    }
-
-    res.json({
-      ...result,
-      type: 'long-answer',
-      wordCount: wordCount,
-      readingTime: Math.ceil(result.text.split(' ').length / 200) + ' minutes'
-    });
-
+    
+    if (req.query.download === 'pdf') return generatePDF(result.text, res, `Long Answer - ${prompt}`);
+    res.json({ ...result, type: 'long-answer' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error); // Pass to central error handler
   }
 });
 
-// 🧠 Short Answer Endpoint
-app.post('/generate-short-answer', async (req, res) => {
+app.post('/generate-short-answer', async (req, res, next) => {
   try {
     const { prompt } = req.body;
-    if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+    if (!prompt) return res.status(400).json({ error: 'Prompt zaroori hai' });
 
-    const context = `Provide a concise, accurate 2-3 sentence answer to "${prompt}".
-    Be direct, factual, and focus on the essential information only.`;
-
+    const context = `Provide a concise, accurate 2-3 sentence answer to "${prompt}".`;
     const result = await generateAIResponse(prompt, context, 'short');
-    res.json({
-      ...result,
-      type: 'short-answer',
-      sentenceCount: (result.text.match(/\./g) || []).length
-    });
-
+    res.json({ ...result, type: 'short-answer' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error); // Pass to central error handler
   }
 });
 
-// 🧩 Quiz Generator Endpoint
-app.post('/generate-quiz', async (req, res) => {
+app.post('/generate-quiz', async (req, res, next) => {
   try {
-    const { 
-      prompt, 
-      difficulty = 'medium', 
-      questionCount = 5,
-      quizType = 'mixed' 
-    } = req.body;
+    const { prompt, difficulty = 'medium', questionCount = 5, quizType = 'mixed' } = req.body;
+    if (!prompt) return res.status(400).json({ error: 'Topic zaroori hai' });
 
-    if (!prompt) return res.status(400).json({ error: 'Topic is required' });
-
-    const context = `Generate a ${questionCount}-question ${quizType} quiz on "${prompt}" at ${difficulty} difficulty.
-    Include: Multiple choice (MCQ), True/False, and Short answer questions.
-    Format each question clearly with answers at the end.
-    Add a brief explanation for each answer.`;
-
+    const context = `Generate a ${questionCount}-question ${quizType} quiz on "${prompt}" at ${difficulty} difficulty. Include: Multiple choice, True/False, and Short answer questions. Provide answers with explanations at the end.`;
     const result = await generateAIResponse(prompt, context, 'quiz');
-
-    if (req.query.download === 'pdf') {
-      return generatePDF(result.text, res, `Quiz - ${prompt}`);
-    }
-
-    res.json({
-      ...result,
-      type: 'quiz',
-      difficulty,
-      questionCount,
-      quizType
-    });
-
+    
+    if (req.query.download === 'pdf') return generatePDF(result.text, res, `Quiz - ${prompt}`);
+    res.json({ ...result, type: 'quiz', difficulty, questionCount });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error); // Pass to central error handler
   }
 });
 
-// ✅ Grammar Fixer Endpoint
-app.post('/fix-grammar', async (req, res) => {
+app.post('/fix-grammar', async (req, res, next) => {
   try {
     const { text, style = 'academic' } = req.body;
-    if (!text) return res.status(400).json({ error: 'Text is required' });
+    if (!text) return res.status(400).json({ error: 'Text zaroori hai' });
 
-    const context = `You are an expert editor. Improve the grammar, punctuation, clarity, 
-    and ${style} style of the following text while preserving the original meaning.
-    Return only the corrected version with improvements.`;
-
+    const context = `Improve the grammar, punctuation, and ${style} style of the following text. Return only the corrected version.`;
     const result = await generateAIResponse(text, context, 'grammar');
-    res.json({
-      ...result,
-      type: 'grammar-correction',
-      originalLength: text.length,
-      correctedLength: result.text.length,
-      style
-    });
-
+    res.json({ ...result, type: 'grammar-correction', style });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error); // Pass to central error handler
   }
 });
 
-// 💬 AI Chat Tutor Endpoint
-app.post('/chat', async (req, res) => {
+app.post('/chat', async (req, res, next) => {
   try {
     const { message, history = [], studentLevel = 'high-school' } = req.body;
-    if (!message) return res.status(400).json({ error: 'Message is required' });
+    if (!message) return res.status(400).json({ error: 'Message zaroori hai' });
 
-    const context = `You are an AI tutor for ${studentLevel} students. 
-    Be helpful, patient, and educational. Explain concepts clearly with relatable examples.
-    Keep responses engaging and appropriate for learners.
-    Current conversation history: ${JSON.stringify(history.slice(-3))}`;
-
+    const context = `You are an AI tutor for ${studentLevel} students. Be helpful and explain concepts clearly. Conversation history: ${JSON.stringify(history.slice(-3))}`;
     const result = await generateAIResponse(message, context, 'chat');
-    res.json({
-      ...result,
-      type: 'tutor-response',
-      studentLevel,
-      conversationLength: history.length + 1
-    });
-
+    res.json({ ...result, type: 'tutor-response' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    next(error); // Pass to central error handler
   }
 });
 
-// Add OPTIONS endpoints for CORS preflight
-app.options('/generate-*', cors());
+
+// === Error Handling and 404 ===
 
 // 404 handler for undefined routes
-app.use('*', (req, res) => {
-  res.status(404).json({
-    error: 'Endpoint not found',
-    availableEndpoints: [
-      'POST /generate-assignment',
-      'POST /generate-long-answer',
-      'POST /generate-short-answer', 
-      'POST /generate-quiz',
-      'POST /fix-grammar',
-      'POST /chat',
-      'GET /health'
-    ]
+app.use((req, res) => {
+  res.status(404).json({ error: 'Endpoint not found' });
+});
+
+// Central error handling middleware
+app.use((err, req, res, next) => {
+  console.error('❌ Server Error:', err.message);
+  res.status(err.status || 500).json({
+    error: 'Internal server error',
+    message: err.message
   });
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received. Shutting down gracefully...');
-  server.close(() => {
-    console.log('Process terminated');
-  });
-});
+// === Server Start and Shutdown ===
 
-process.on('SIGINT', () => {
-  console.log('SIGINT received. Shutting down gracefully...');
-  server.close(() => {
-    console.log('Process terminated');
-  });
-});
-
-// Start server
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 EduSmart AI Server running on port ${PORT}`);
-  console.log(`📡 API Base: http://localhost:${PORT}`);
-  console.log(`✅ Health Check: http://localhost:${PORT}/health`);
-  console.log(`📚 Endpoints available for: Assignment, Long Answer, Short Answer, Quiz, Grammar Fix, Chat Tutor`);
+  console.log(`🚀 EduSmart AI Server chal raha hai port ${PORT} par`);
   console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-// Export for testing
-module.exports = { app, server, generateAIResponse };
+const gracefulShutdown = (signal) => {
+  console.log(`${signal} mila. Server ko aaram se band kar rahe hain...`);
+  server.close(() => {
+    console.log('Process band ho gaya.');
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+module.exports = { app, server };
