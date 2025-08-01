@@ -2,10 +2,10 @@
   "name": "edusmart-ai-backend",
   "version": "1.0.0",
   "description": "AI-powered backend for an educational website with dedicated models and API keys.",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "author": "SahilCodeLab",
   "license": "ISC",
