@@ -42,10 +42,13 @@ function generatePDF(content, res) {
     doc.end();
 }
 
-// 🧠 Short Answer - Gemma (model from .env)
+// 🧠 Short Answer - Gemma
 app.post('/generate-short-answer', async (req, res) => {
     try {
-        if (!prompt || !prompt.trim()) {   return res.status(400).json({ error: "Prompt is required" }); }
+        const { prompt } = req.body;
+        if (!prompt || !prompt.trim()) {
+            return res.status(400).json({ error: "Prompt is required" });
+        }
         const context = 'Answer in 2-3 lines clearly.';
         const modelName = process.env.MODEL_SHORT_ANSWER || 'google/gemma-3n-e4b-it:free';
         const result = await callModelWithClient(openai1, modelName, prompt, context);
@@ -60,6 +63,9 @@ app.post('/generate-short-answer', async (req, res) => {
 app.post('/generate-long-answer', async (req, res) => {
     try {
         const { prompt } = req.body;
+        if (!prompt || !prompt.trim()) {
+            return res.status(400).json({ error: "Prompt is required" });
+        }
         const context = 'Write a detailed answer (300-500 words).';
         const result = await callModelWithClient(openai2, 'qwen/qwen3-coder:free', prompt, context);
         if (req.query.download === 'pdf') return generatePDF(result, res);
@@ -74,6 +80,9 @@ app.post('/generate-long-answer', async (req, res) => {
 app.post('/generate-assignment', async (req, res) => {
     try {
         const { prompt } = req.body;
+        if (!prompt || !prompt.trim()) {
+            return res.status(400).json({ error: "Prompt is required" });
+        }
         const context = 'Create a 9-10 page academic assignment (3500+ words) with clear headings.';
         const result = await callModelWithClient(openai3, 'google/gemini-2.0-flash-exp:free', prompt, context);
         if (req.query.download === 'pdf') return generatePDF(result, res);
