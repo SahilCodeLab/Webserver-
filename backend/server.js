@@ -43,12 +43,12 @@ function generatePDF(content, res) {
     doc.end();
 }
 
-// 🧠 Short Answer - Gemma
+// 🧠 Short Answer - Gemma (Updated to e4b)
 app.post('/generate-short-answer', async (req, res) => {
     try {
         const { prompt } = req.body;
         const context = 'Answer in 2-3 lines clearly.';
-        const result = await callModelWithClient(openai1, 'google/gemma-3n-e2b-it:free', prompt, context);
+        const result = await callModelWithClient(openai1, 'google/gemma-3n-e4b-it:free', prompt, context);
         res.json({ text: result, source: 'gemma' });
     } catch (err) {
         res.status(500).json({ error: err.message });
