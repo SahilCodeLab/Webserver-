@@ -45,7 +45,7 @@ function generatePDF(content, res) {
 // 🧠 Short Answer - Gemma (model from .env)
 app.post('/generate-short-answer', async (req, res) => {
     try {
-        const { prompt } = req.body;
+        if (!prompt || !prompt.trim()) {   return res.status(400).json({ error: "Prompt is required" }); }
         const context = 'Answer in 2-3 lines clearly.';
         const modelName = process.env.MODEL_SHORT_ANSWER || 'google/gemma-3n-e4b-it:free';
         const result = await callModelWithClient(openai1, modelName, prompt, context);
