@@ -17,7 +17,6 @@ const openai3 = new OpenAI({ apiKey: process.env.OPENROUTER_API_KEY_3, baseURL: 
 
 // 🔁 Generic Function
 async function callModelWithClient(openai, model, prompt, context) {
-    const fullPrompt = `${context}\n\n${prompt}`;
     const completion = await openai.chat.completions.create({
         model,
         messages: [
@@ -43,14 +42,16 @@ function generatePDF(content, res) {
     doc.end();
 }
 
-// 🧠 Short Answer - Gemma (Updated to e4b)
+// 🧠 Short Answer - Gemma (model from .env)
 app.post('/generate-short-answer', async (req, res) => {
     try {
         const { prompt } = req.body;
         const context = 'Answer in 2-3 lines clearly.';
-        const result = await callModelWithClient(openai1, 'google/gemma-3n-e4b-it:free', prompt, context);
+        const modelName = process.env.MODEL_SHORT_ANSWER || 'google/gemma-3n-e4b-it:free';
+        const result = await callModelWithClient(openai1, modelName, prompt, context);
         res.json({ text: result, source: 'gemma' });
     } catch (err) {
+        console.error('❌ Short Answer Error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -64,6 +65,7 @@ app.post('/generate-long-answer', async (req, res) => {
         if (req.query.download === 'pdf') return generatePDF(result, res);
         res.json({ text: result, source: 'qwen' });
     } catch (err) {
+        console.error('❌ Long Answer Error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
@@ -77,6 +79,7 @@ app.post('/generate-assignment', async (req, res) => {
         if (req.query.download === 'pdf') return generatePDF(result, res);
         res.json({ text: result, source: 'gemini' });
     } catch (err) {
+        console.error('❌ Assignment Error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
